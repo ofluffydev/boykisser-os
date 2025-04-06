@@ -1,0 +1,15 @@
+[package]
+name = "boykernel"
+version = "0.1.0"
+edition = "2024"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+
+[dependencies]
+embedded-graphics = "0.8.1"
+goblin = { version = "0.9.3", default-features = false, features = ["elf64"] }
+libm = "0.2.11"
