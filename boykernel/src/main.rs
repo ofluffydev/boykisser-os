@@ -3,81 +3,26 @@
 
 use core::{arch::asm, ptr};
 
-#[repr(C)]
-pub struct FramebufferInfo {
-    pub address: u64,
-    pub size: usize,
-    pub width: usize,
-    pub height: usize,
-    pub stride: usize,
-    pub format: u32,
-}
+use framebuffer::FramebufferInfo;
+use gop_render::SimplifiedRenderer;
+mod gop_render;
+mod framebuffer;
+mod font;
 
-pub const FONT: [[u8; 8]; 9] = [
-    // H
-    [0x42, 0x42, 0x42, 0x7E, 0x42, 0x42, 0x42, 0x00],
-    // E
-    [0x7E, 0x40, 0x40, 0x7C, 0x40, 0x40, 0x7E, 0x00],
-    // L
-    [0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x7E, 0x00],
-    // L
-    [0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x7E, 0x00],
-    // O
-    [0x3C, 0x42, 0x42, 0x42, 0x42, 0x42, 0x3C, 0x00],
-    // (space)
-    [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-    // A
-    [0x18, 0x24, 0x42, 0x7E, 0x42, 0x42, 0x42, 0x00],
-    // R
-    [0x7C, 0x42, 0x42, 0x7C, 0x48, 0x44, 0x42, 0x00],
-    // Y
-    [0x42, 0x42, 0x24, 0x18, 0x18, 0x18, 0x18, 0x00],
-];
-
-#[unsafe(no_mangle)]
+#[unsafe(no_mangle)] // THIS HAS TO BE &FrameBufferInfo or it WILL NOT WORK
 pub extern "C" fn _start(fb: &FramebufferInfo) -> ! {
-    let fb_ptr = fb.address as *mut u32;
-    let width = fb.width;
-    let stride = fb.stride;
+    // B background
+    let renderer = SimplifiedRenderer::new(fb); // Pass fb directly
+    renderer.clear_screen();
 
-    // Black background
-    unsafe {
-        for i in 0..(fb.size / 4) {
-            *fb_ptr.add(i) = 0x000000; // black
-        }
-    }
+    // Render some text (Fixed to the top left)
+    // renderer.test_text("Short test");
 
-    // White pixels for text
-    let color = 0xFFFFFF;
-
-    for (i, glyph) in FONT.iter().enumerate() {
-        draw_char(fb_ptr, width, stride, 10 + (i * 10), 10, glyph, color);
-    }
+    // Render some extra garbage to see that it worked.
+    renderer.render_content();
 
     loop {
         unsafe { asm!("hlt") }
-    }
-}
-
-fn draw_char(
-    fb: *mut u32,
-    _fb_width: usize, // Prefix unused variable with an underscore
-    stride: usize,
-    x_offset: usize,
-    y_offset: usize,
-    bitmap: &[u8; 8],
-    color: u32,
-) {
-    for (y, row) in bitmap.iter().enumerate() {
-        for x in 0..8 {
-            if (row >> (7 - x)) & 1 != 0 {
-                let px = x_offset + x;
-                let py = y_offset + y;
-                unsafe {
-                    *fb.add(py * stride + px) = color;
-                }
-            }
-        }
     }
 }
 
