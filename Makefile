@@ -9,7 +9,7 @@ BOOTLOADER_BUILD_DIR := $(if $(RELEASE),release,debug)
 BOOTLOADER_PATH = $(CURDIR)/boyloader/target/x86_64-unknown-uefi/$(BOOTLOADER_BUILD_DIR)/boyloader.efi
 ESP_DIR = esp/efi/boot
 
-.PHONY: run clean build-kernel build-bootloader check-artifacts esp fat iso qemu
+.PHONY: run clean build-kernel build-bootloader check-artifacts esp fat iso qemu rust-clean
 
 run: iso
 	# Run with QEMU
@@ -32,7 +32,7 @@ esp: check-artifacts
 	cp $(KERNEL_PATH) $(ESP_DIR)/$(KERNEL_NAME)
 
 fat: esp
-	dd if=/dev/zero of=$(FAT_IMG) bs=1M count=64
+	dd if=/dev/zero of=$(FAT_IMG) bs=1M count=33
 	mformat -i $(FAT_IMG) -F ::
 	mmd -i $(FAT_IMG) ::/EFI
 	mmd -i $(FAT_IMG) ::/EFI/BOOT
@@ -50,3 +50,7 @@ qemu: iso
 		-drive format=raw,file=$(ISO_FILE) \
 		-smp 4 -m 6G -cpu max \
 		-device qemu-xhci -device usb-kbd --serial stdio -M q35 --no-reboot
+
+rust-clean:
+	cd boykernel && cargo clean
+	cd boyloader && cargo clean
