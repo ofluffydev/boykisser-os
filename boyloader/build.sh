@@ -1,7 +1,11 @@
+#!/bin/bash
+
+# boykisser-os/boyloader/build.sh
+
 set -e
 
 # Define kernel path
-KERNEL_PATH="/home/fluffy/Code/boykernel/target/x86_64-custom/release/boykernel"
+KERNEL_PATH="../boykernel/target/x86_64-custom/release/boykernel"
 KERNEL_NAME="boykernel"
 
 # Define OVMF file paths
@@ -71,3 +75,6 @@ if [[ "$1" == "--run" && "$1" != "--iso" ]]; then
         -drive format=raw,file=cdimage.iso -smp 4 -m 6G -cpu max \
         -device qemu-xhci -device usb-kbd --serial stdio -M q35 --no-reboot
 fi
+
+# ...existing code replaced by the boyloader Makefile...
+exit 0
