@@ -8,7 +8,6 @@ Boykernel is a minimalistic, experimental operating system kernel designed for x
 - **No Standard Library**: Operates in a `#![no_std]` environment, suitable for bare-metal development.
 - **Custom Target**: Uses a custom `x86_64-unknown-none` target for building the kernel.
 - **Panic Handling**: Implements a custom panic handler for kernel-level error handling.
-- **Embedded Graphics**: Supports rendering basic graphics using the `embedded-graphics` crate.
 
 ## Getting Started
 

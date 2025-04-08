@@ -1,4 +1,5 @@
 use core::slice::from_raw_parts_mut;
+use spin::Mutex;
 
 use crate::{font::PSF2Font, framebuffer::FramebufferInfo, watermark::parse_ppm};
 
@@ -20,6 +21,21 @@ pub enum Color {
 impl Color {
     pub fn as_u32(self) -> u32 {
         self as u32
+    }
+}
+
+// Global cursor state
+pub static CURSOR_STATE: Mutex<CursorState> = Mutex::new(CursorState { x: 0, y: 0 });
+
+// Define the CursorState struct
+pub struct CursorState {
+    pub x: usize,
+    pub y: usize,
+}
+
+impl CursorState {
+    pub fn new(x: usize, y: usize) -> Self {
+        Self { x, y }
     }
 }
 
@@ -129,8 +145,10 @@ impl<'a> SimplifiedRenderer<'a> {
         let buffer_slice =
             unsafe { from_raw_parts_mut(self.buffer.address as *mut u32, self.buffer.size / 4) };
 
-        const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        for (i, &ch) in ALPHABET.iter().enumerate() {
+        const UPPERCASE_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        const LOWERCASE_ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
+        const PADDING: usize = 10;
+        for (i, &ch) in UPPERCASE_ALPHABET.iter().enumerate() {
             draw_char(
                 buffer_slice,
                 self.buffer.width,
@@ -142,6 +160,90 @@ impl<'a> SimplifiedRenderer<'a> {
                 ch,
             );
         }
+        for (i, &ch) in LOWERCASE_ALPHABET.iter().enumerate() {
+            draw_char(
+                buffer_slice,
+                self.buffer.width,
+                10 + (i * letter_width),
+                10 + (font.header.height as usize + PADDING),
+                Color::White.as_u32(),
+                Color::Black.as_u32(),
+                &font,
+                ch,
+            );
+        }
+
+        // Move the cursor below all of this
+        let mut cursor = CURSOR_STATE.lock();
+        cursor.x = 10;
+        cursor.y = (PADDING + font.header.height as usize) * 2;
+    }
+
+    pub fn println(&self, text: &str) {
+        let font = crate::font::load_font().unwrap();
+        let letter_width = font.header.width as usize;
+
+        // Convert the buffer into a mutable slice (WILL NOT WORK OTHERWISE)
+        let buffer_slice =
+            unsafe { from_raw_parts_mut(self.buffer.address as *mut u32, self.buffer.size / 4) };
+
+        let mut cursor = CURSOR_STATE.lock();
+
+        // Ensure the cursor starts at a valid position
+        if cursor.x == 0 && cursor.y == 0 {
+            cursor.x = 10; // Add padding for cleaner output
+            cursor.y = 10;
+        }
+
+        for ch in text.chars() {
+            if ch == '\n' {
+                cursor.x = 10; // Reset to the start of the line with padding
+                cursor.y += font.header.height as usize;
+                continue;
+            }
+
+            if cursor.y + font.header.height as usize > self.buffer.height {
+                let overflow = cursor.y + font.header.height as usize - self.buffer.height;
+                cursor.y -= overflow;
+                let buffer_slice = unsafe {
+                    from_raw_parts_mut(self.buffer.address as *mut u32, self.buffer.size / 4)
+                };
+                for row in overflow..self.buffer.height {
+                    let src_index = row * self.buffer.width;
+                    let dest_index = (row - overflow) * self.buffer.width;
+                    buffer_slice.copy_within(src_index..src_index + self.buffer.width, dest_index);
+                }
+                for row in (self.buffer.height - overflow)..self.buffer.height {
+                    let start_index = row * self.buffer.width;
+                    let end_index = start_index + self.buffer.width;
+                    for pixel in &mut buffer_slice[start_index..end_index] {
+                        *pixel = Color::Black.as_u32();
+                    }
+                }
+            }
+
+            draw_char(
+                buffer_slice,
+                self.buffer.width,
+                cursor.x,
+                cursor.y,
+                Color::White.as_u32(),
+                Color::Black.as_u32(),
+                &font,
+                ch as u8,
+            );
+
+            cursor.x += letter_width;
+
+            if cursor.x + letter_width > self.buffer.width {
+                cursor.x = 10; // Reset to the start of the line with padding
+                cursor.y += font.header.height as usize;
+            }
+        }
+
+        // Since we're println and not print, always go down.
+        cursor.x = 10; // Reset to the start of the line with padding
+        cursor.y += font.header.height as usize;
     }
 
     pub fn show_watermark(&self) {
@@ -164,7 +266,7 @@ impl<'a> SimplifiedRenderer<'a> {
                 if fb_x < fb_width && fb_y < fb_height {
                     let index = fb_y * fb_stride + fb_x;
                     let pixel_index = (y * width + x) * 3;
-                    if pixel_index + 2 < pixel_data.len() {
+                    if (pixel_index + 2) < pixel_data.len() {
                         let r = pixel_data[pixel_index] as u32;
                         let g = pixel_data[pixel_index + 1] as u32;
                         let b = pixel_data[pixel_index + 2] as u32;

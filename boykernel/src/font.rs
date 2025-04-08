@@ -53,9 +53,15 @@ impl<'a> PSF2Font<'a> {
     }
 }
 
-// Example usage
-static FONT_DATA: &[u8] = include_bytes!("../spleen-2.1.0/spleen-32x64.psfu");
+#[allow(dead_code)]
+static SPLEEN_32X64: &[u8] = include_bytes!("../spleen-2.1.0/spleen-32x64.psfu");
+#[allow(dead_code)]
+static SPLEEN_12X24: &[u8] = include_bytes!("../spleen-2.1.0/spleen-12x24.psfu");
+#[allow(dead_code)]
+static SPLEEN_6X12: &[u8] = include_bytes!("../spleen-2.1.0/spleen-6x12.psfu");
+#[allow(dead_code)]
+static SPLEEN_5X8: &[u8] = include_bytes!("../spleen-2.1.0/spleen-5x8.psfu");
 
 pub fn load_font() -> Option<PSF2Font<'static>> {
-    PSF2Font::from_bytes(FONT_DATA)
+    PSF2Font::from_bytes(SPLEEN_12X24)
 }
