@@ -1,5 +1,6 @@
-use crate::font::Font;
-use crate::framebuffer::FramebufferInfo;
+use core::slice::from_raw_parts_mut;
+
+use crate::{font::PSF2Font, framebuffer::FramebufferInfo};
 
 /// Graphics abstraction for the buffer graphics
 pub struct SimplifiedRenderer<'a> {
@@ -24,7 +25,7 @@ impl<'a> SimplifiedRenderer<'a> {
         let stride = self.buffer.stride;
 
         // White pixels for text
-        let color = 0xFFFFFF;
+        let _color = 0xFFFFFF;
 
         const FONT: [[u8; 8]; 5] = [
             [
@@ -48,17 +49,17 @@ impl<'a> SimplifiedRenderer<'a> {
                 0b00000000,
             ], // O
         ];
-        for (i, glyph) in FONT.iter().enumerate() {
-            draw_char(
-                self.buffer.address as *mut u32,
-                width,
-                stride,
-                10 + (i * 10),
-                10,
-                glyph,
-                color,
-            );
-        }
+        // for (i, glyph) in FONT.iter().enumerate() {
+        //     draw_char(
+        //         self.buffer.address as *mut u32,
+        //         width,
+        //         stride,
+        //         10 + (i * 10),
+        //         10,
+        //         glyph,
+        //         color,
+        //     );
+        // }
 
         // Draw random shapes
         draw_rectangle(
@@ -144,59 +145,26 @@ impl<'a> SimplifiedRenderer<'a> {
         ); // Yellow border
     }
 
-    pub fn test_text(&self, text: &str) {
-        static FONT_DATA: &[u8] = include_bytes!("../spleen-2.1.0/spleen-8x16.psfu");
-        let font = Font::from_bytes(FONT_DATA).expect("Invalid PSF2 font");
+    pub fn show_alphabet(&self, _text: &str) {
+        let font = crate::font::load_font().unwrap();
+        let letter_width = font.header.width as usize;
 
-        let stride = self.buffer.stride;
-        let width = self.buffer.width;
-        let color = 0xFFFFFF;
+        // Convert the buffer into a mutable slice (WILL NOT WORK OTHERWISE)
+        let buffer_slice =
+            unsafe { from_raw_parts_mut(self.buffer.address as *mut u32, self.buffer.size / 4) };
 
-        let mut x_offset = 10;
-        let mut y_offset = 10;
-
-        for ch in text.bytes() {
-            // Prevent text from spilling beyond buffer
-            if x_offset + font.header.width as usize >= width {
-                x_offset = 10;
-                y_offset += font.header.height as usize + 1;
-            }
-            if let Some(glyph) = font.get_glyph(ch as usize) {
-                draw_psf2_char(
-                    self.buffer.address as *mut u32,
-                    width,
-                    stride,
-                    x_offset,
-                    y_offset,
-                    glyph,
-                    font.header.width as usize,
-                    font.header.height as usize,
-                    color,
-                );
-                x_offset += font.header.width as usize + 1; // Add spacing
-            }
-        }
-    }
-}
-
-fn draw_char(
-    fb: *mut u32,
-    _fb_width: usize,
-    stride: usize,
-    x_offset: usize,
-    y_offset: usize,
-    bitmap: &[u8; 8],
-    color: u32,
-) {
-    for (y, row) in bitmap.iter().enumerate() {
-        for x in 0..8 {
-            if (row >> (7 - x)) & 1 != 0 {
-                let px = x_offset + x;
-                let py = y_offset + y;
-                unsafe {
-                    *fb.add(py * stride + px) = color;
-                }
-            }
+        const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        for (i, &ch) in ALPHABET.iter().enumerate() {
+            draw_char(
+                buffer_slice,
+                self.buffer.width,
+                10 + (i * letter_width),
+                10,
+                0xFFFFFFFF, // white text
+                0x00000000, // black background
+                &font,
+                ch,
+            );
         }
     }
 }
@@ -240,26 +208,35 @@ fn draw_border(fb: *mut u32, width: usize, stride: usize, height: usize, color: 
     }
 }
 
-fn draw_psf2_char(
-    fb: *mut u32,
-    _fb_width: usize,
-    stride: usize,
-    x_offset: usize,
-    y_offset: usize,
-    glyph: &[u8],
-    _glyph_width: usize,
-    glyph_height: usize,
+pub fn draw_char(
+    framebuffer: &mut [u32],
+    framebuffer_width: usize,
+    x: usize,
+    y: usize,
     color: u32,
+    bg_color: u32,
+    font: &PSF2Font,
+    ch: u8,
 ) {
-    for y in 0..glyph_height {
-        let row = glyph[y]; // 1 byte per row
-        for x in 0..8 {
-            let bit = (row >> (7 - x)) & 1;
-            if bit != 0 {
-                let px = x_offset + x;
-                let py = y_offset + y;
-                unsafe {
-                    *fb.add(py * stride + px) = color; // Use stride directly
+    if let Some(glyph) = font.glyph(ch as u32) {
+        let bytes_per_row = (font.header.width + 7) / 8;
+        let height = font.header.height as usize;
+        let width = font.header.width as usize;
+
+        for row in 0..height {
+            let row_offset = row * bytes_per_row as usize;
+
+            for col in 0..width {
+                let byte = glyph.get(row_offset + (col / 8)).copied().unwrap_or(0);
+                let bit = 7 - (col % 8);
+                let on = (byte >> bit) & 1;
+
+                let fb_x = x + col;
+                let fb_y = y + row;
+
+                if fb_x < framebuffer_width && fb_y * framebuffer_width + fb_x < framebuffer.len() {
+                    let index = fb_y * framebuffer_width + fb_x;
+                    framebuffer[index] = if on != 0 { color } else { bg_color };
                 }
             }
         }

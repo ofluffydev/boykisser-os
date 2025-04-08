@@ -1,12 +1,7 @@
-pub struct Font<'a> {
-    pub header: &'a Psf2Header,
-    pub glyphs: &'a [u8],
-}
-
 #[repr(C)]
-#[derive(Debug)]
-pub struct Psf2Header {
-    pub magic: [u8; 4],
+#[derive(Debug, Clone, Copy)]
+pub struct PSF2Header {
+    pub magic: u32,
     pub version: u32,
     pub headersize: u32,
     pub flags: u32,
@@ -16,29 +11,51 @@ pub struct Psf2Header {
     pub width: u32,
 }
 
-impl<'a> Font<'a> {
-    pub fn from_bytes(data: &'a [u8]) -> Option<Self> {
-        if data.len() < core::mem::size_of::<Psf2Header>() {
+// PSF2 magic number
+const PSF2_MAGIC: u32 = 0x864ab572;
+
+pub struct PSF2Font<'a> {
+    pub header: PSF2Header,
+    pub glyphs: &'a [u8],
+}
+
+impl<'a> PSF2Font<'a> {
+    pub fn from_bytes(bytes: &'a [u8]) -> Option<Self> {
+        if bytes.len() < core::mem::size_of::<PSF2Header>() {
             return None;
         }
 
-        let header = unsafe { &*(data.as_ptr() as *const Psf2Header) };
+        // SAFETY: PSF2Header is repr(C) and all fields are plain integers.
+        let header = unsafe { *(bytes.as_ptr() as *const PSF2Header) };
 
-        if header.magic != [0x72, 0xb5, 0x4a, 0x86] {
-            return None; // Invalid PSF2 magic number
+        if header.magic != PSF2_MAGIC {
+            return None;
         }
 
-        let glyphs = &data[header.headersize as usize..];
+        let glyph_data_offset = header.headersize as usize;
+        let glyph_data_len = (header.glyph_count * header.bytes_per_glyph) as usize;
+
+        if bytes.len() < glyph_data_offset + glyph_data_len {
+            return None;
+        }
+
+        let glyphs = &bytes[glyph_data_offset..glyph_data_offset + glyph_data_len];
         Some(Self { header, glyphs })
     }
 
-    pub fn get_glyph(&self, index: usize) -> Option<&[u8]> {
-        if index >= self.header.glyph_count as usize {
+    pub fn glyph(&self, index: u32) -> Option<&'a [u8]> {
+        if index >= self.header.glyph_count {
             return None;
         }
-
-        let start = index * self.header.bytes_per_glyph as usize;
+        let start = (index * self.header.bytes_per_glyph) as usize;
         let end = start + self.header.bytes_per_glyph as usize;
-        Some(&self.glyphs[start..end])
+        self.glyphs.get(start..end)
     }
+}
+
+// Example usage
+static FONT_DATA: &[u8] = include_bytes!("../spleen-2.1.0/spleen-32x64.psfu");
+
+pub fn load_font() -> Option<PSF2Font<'static>> {
+    PSF2Font::from_bytes(FONT_DATA)
 }

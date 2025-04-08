@@ -1,13 +1,14 @@
 #![no_std]
 #![no_main]
+#![allow(dead_code)]
 
 use core::{arch::asm, ptr};
 
 use framebuffer::FramebufferInfo;
 use gop_render::SimplifiedRenderer;
-mod gop_render;
-mod framebuffer;
 mod font;
+mod framebuffer;
+mod gop_render;
 
 #[unsafe(no_mangle)] // THIS HAS TO BE &FrameBufferInfo or it WILL NOT WORK
 pub extern "C" fn _start(fb: &FramebufferInfo) -> ! {
@@ -16,10 +17,10 @@ pub extern "C" fn _start(fb: &FramebufferInfo) -> ! {
     renderer.clear_screen();
 
     // Render some text (Fixed to the top left)
-    // renderer.test_text("Short test");
+    renderer.show_alphabet("Short test");
 
     // Render some extra garbage to see that it worked.
-    renderer.render_content();
+    // renderer.render_content();
 
     loop {
         unsafe { asm!("hlt") }
