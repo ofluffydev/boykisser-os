@@ -27,8 +27,8 @@ fn main() -> Status {
     let mut output = open_protocol_exclusive::<Output>(handle).unwrap();
     output.clear().expect("Failed to clear screen");
     info!("boyloader online!");
-    info!("Launching in 3 seconds...");
-    boot::stall(3_000_000);
+    //info!("Launching in 3 seconds...");
+    //boot::stall(3_000_000);
     output.clear().expect("Failed to clear screen");
     boot_system();
 

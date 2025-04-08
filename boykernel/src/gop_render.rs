@@ -1,10 +1,26 @@
 use core::slice::from_raw_parts_mut;
 
-use crate::{font::PSF2Font, framebuffer::FramebufferInfo};
+use crate::{font::PSF2Font, framebuffer::FramebufferInfo, watermark::parse_ppm};
 
 /// Graphics abstraction for the buffer graphics
 pub struct SimplifiedRenderer<'a> {
     buffer: &'a FramebufferInfo,
+}
+
+/// Enum representing colors
+pub enum Color {
+    Black = 0x000000,
+    White = 0xFFFFFF,
+    Red = 0xFF0000,
+    Green = 0x00FF00,
+    Blue = 0x0000FF,
+    Yellow = 0xFFFF00,
+}
+
+impl Color {
+    pub fn as_u32(self) -> u32 {
+        self as u32
+    }
 }
 
 impl<'a> SimplifiedRenderer<'a> {
@@ -15,7 +31,7 @@ impl<'a> SimplifiedRenderer<'a> {
     pub fn clear_screen(&self) {
         unsafe {
             for i in 0..(self.buffer.size / 4) {
-                *(self.buffer.address as *mut u32).add(i) = 0x000000; // black
+                *(self.buffer.address as *mut u32).add(i) = Color::Black.as_u32();
             }
         }
     }
@@ -24,44 +40,6 @@ impl<'a> SimplifiedRenderer<'a> {
         let width = self.buffer.width;
         let stride = self.buffer.stride;
 
-        // White pixels for text
-        let _color = 0xFFFFFF;
-
-        const FONT: [[u8; 8]; 5] = [
-            [
-                0b01111110, 0b10000001, 0b10000001, 0b10000001, 0b10000001, 0b10000001, 0b01111110,
-                0b00000000,
-            ], // H
-            [
-                0b00000000, 0b01111110, 0b00010000, 0b00010000, 0b00010000, 0b00010000, 0b01111110,
-                0b00000000,
-            ], // E
-            [
-                0b01111110, 0b10000000, 0b10000000, 0b01111110, 0b10000000, 0b10000000, 0b01111110,
-                0b00000000,
-            ], // L
-            [
-                0b01111110, 0b10000000, 0b10000000, 0b01111110, 0b10000000, 0b10000000, 0b01111110,
-                0b00000000,
-            ], // L
-            [
-                0b01111110, 0b10000001, 0b10000001, 0b10000001, 0b10000001, 0b10000001, 0b01111110,
-                0b00000000,
-            ], // O
-        ];
-        // for (i, glyph) in FONT.iter().enumerate() {
-        //     draw_char(
-        //         self.buffer.address as *mut u32,
-        //         width,
-        //         stride,
-        //         10 + (i * 10),
-        //         10,
-        //         glyph,
-        //         color,
-        //     );
-        // }
-
-        // Draw random shapes
         draw_rectangle(
             self.buffer.address as *mut u32,
             width,
@@ -70,8 +48,8 @@ impl<'a> SimplifiedRenderer<'a> {
             50,
             100,
             50,
-            0xFF0000,
-        ); // Red rectangle
+            Color::Red.as_u32(),
+        );
         draw_rectangle(
             self.buffer.address as *mut u32,
             width,
@@ -80,8 +58,8 @@ impl<'a> SimplifiedRenderer<'a> {
             100,
             80,
             120,
-            0x00FF00,
-        ); // Green rectangle
+            Color::Green.as_u32(),
+        );
         draw_rectangle(
             self.buffer.address as *mut u32,
             width,
@@ -90,10 +68,9 @@ impl<'a> SimplifiedRenderer<'a> {
             200,
             60,
             60,
-            0x0000FF,
-        ); // Blue square
+            Color::Blue.as_u32(),
+        );
 
-        // Corner squares
         draw_rectangle(
             self.buffer.address as *mut u32,
             width,
@@ -102,7 +79,7 @@ impl<'a> SimplifiedRenderer<'a> {
             0,
             20,
             20,
-            0xFF0000,
+            Color::Red.as_u32(),
         );
         draw_rectangle(
             self.buffer.address as *mut u32,
@@ -112,7 +89,7 @@ impl<'a> SimplifiedRenderer<'a> {
             0,
             20,
             20,
-            0xFF0000,
+            Color::Red.as_u32(),
         );
         draw_rectangle(
             self.buffer.address as *mut u32,
@@ -122,7 +99,7 @@ impl<'a> SimplifiedRenderer<'a> {
             self.buffer.height - 20,
             20,
             20,
-            0xFF0000,
+            Color::Red.as_u32(),
         );
         draw_rectangle(
             self.buffer.address as *mut u32,
@@ -132,20 +109,19 @@ impl<'a> SimplifiedRenderer<'a> {
             self.buffer.height - 20,
             20,
             20,
-            0xFF0000,
+            Color::Red.as_u32(),
         );
 
-        // Draw border around the framebuffer
         draw_border(
             self.buffer.address as *mut u32,
             width,
             stride,
             self.buffer.height,
-            0xFFFF00,
-        ); // Yellow border
+            Color::Yellow.as_u32(),
+        );
     }
 
-    pub fn show_alphabet(&self, _text: &str) {
+    pub fn show_alphabet(&self) {
         let font = crate::font::load_font().unwrap();
         let letter_width = font.header.width as usize;
 
@@ -160,11 +136,43 @@ impl<'a> SimplifiedRenderer<'a> {
                 self.buffer.width,
                 10 + (i * letter_width),
                 10,
-                0xFFFFFFFF, // white text
-                0x00000000, // black background
+                Color::White.as_u32(),
+                Color::Black.as_u32(),
                 &font,
                 ch,
             );
+        }
+    }
+
+    pub fn show_watermark(&self) {
+        const WATERMARK_BYTES: &[u8] = include_bytes!("../art/boykisser.ppm");
+        let ppm = parse_ppm(WATERMARK_BYTES).unwrap();
+        let width = ppm.width;
+        let height = ppm.height;
+        let pixel_data = ppm.data;
+
+        let fb_width = self.buffer.width;
+        let fb_height = self.buffer.height;
+        let fb_stride = self.buffer.stride;
+        let buffer_slice =
+            unsafe { from_raw_parts_mut(self.buffer.address as *mut u32, self.buffer.size / 4) };
+
+        for y in 0..height {
+            for x in 0..width {
+                let fb_x = fb_width - width + x;
+                let fb_y = fb_height - height + y;
+                if fb_x < fb_width && fb_y < fb_height {
+                    let index = fb_y * fb_stride + fb_x;
+                    let pixel_index = (y * width + x) * 3;
+                    if pixel_index + 2 < pixel_data.len() {
+                        let r = pixel_data[pixel_index] as u32;
+                        let g = pixel_data[pixel_index + 1] as u32;
+                        let b = pixel_data[pixel_index + 2] as u32;
+                        let color = (0xFF << 24) | (r << 16) | (g << 8) | b;
+                        buffer_slice[index] = color;
+                    }
+                }
+            }
         }
     }
 }
@@ -191,19 +199,17 @@ fn draw_rectangle(
 }
 
 fn draw_border(fb: *mut u32, width: usize, stride: usize, height: usize, color: u32) {
-    // Top and bottom borders
     for x in 0..width {
         unsafe {
-            *fb.add(x) = color; // Top border
-            *fb.add((height - 1) * stride + x) = color; // Bottom border (fixed)
+            *fb.add(x) = color;
+            *fb.add((height - 1) * stride + x) = color;
         }
     }
 
-    // Left and right borders
     for y in 0..height {
         unsafe {
-            *fb.add(y * stride) = color; // Left border
-            *fb.add(y * stride + (width - 1)) = color; // Right border
+            *fb.add(y * stride) = color;
+            *fb.add(y * stride + (width - 1)) = color;
         }
     }
 }

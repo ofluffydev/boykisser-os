@@ -10,6 +10,7 @@ panic = "abort"
 panic = "abort"
 
 [dependencies]
+arrayvec = { version = "0.7.6", default-features = false }
 embedded-graphics = "0.8.1"
 goblin = { version = "0.9.3", default-features = false, features = ["elf64"] }
 libm = "0.2.11"
