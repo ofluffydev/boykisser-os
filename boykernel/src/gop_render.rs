@@ -1,7 +1,7 @@
 use core::slice::from_raw_parts_mut;
 use spin::Mutex;
 
-use crate::{font::PSF2Font, framebuffer::FramebufferInfo, watermark::parse_ppm};
+use crate::{font::PSF2Font, framebuffer::FramebufferInfo, strings::concat, watermark::parse_ppm};
 
 /// Graphics abstraction for the buffer graphics
 pub struct SimplifiedRenderer<'a> {
@@ -33,6 +33,7 @@ pub struct CursorState {
     pub y: usize,
 }
 
+#[allow(dead_code)]
 impl CursorState {
     pub fn new(x: usize, y: usize) -> Self {
         Self { x, y }
@@ -180,6 +181,10 @@ impl<'a> SimplifiedRenderer<'a> {
     }
 
     pub fn println(&self, text: &str) {
+        self.print(&concat(text, "\n"));
+    }
+
+    pub fn print(&self, text: &str) {
         let font = crate::font::load_font().unwrap();
         let letter_width = font.header.width as usize;
 

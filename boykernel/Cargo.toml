@@ -13,6 +13,8 @@ panic = "abort"
 arrayvec = { version = "0.7.6", default-features = false }
 goblin = { version = "0.9.3", default-features = false, features = ["elf64"] }
 heapless = { version = "0.8.0", default-features = false }
+lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
 libm = "0.2.11"
 once_cell = { version = "1.21.3", default-features = false }
 spin = { version = "0.10.0", default-features = false, features = ["mutex", "once", "spin_mutex"] }
+x86_64 = "0.15.2"

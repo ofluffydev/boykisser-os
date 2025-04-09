@@ -64,6 +64,35 @@ The kernel uses a custom `FramebufferInfo` structure to interact with the frameb
 
 A simple `memset` function is implemented for memory initialization.
 
+## TODO
+
+- [x] Bootstrapping and initialization
+- [ ] Interrupt handling  
+- [ ] Timer management  
+- [ ] CPU context switching  
+- [ ] Memory management  
+- [ ] Virtual memory  
+- [ ] User and kernel mode separation  
+- [ ] System call interface  
+- [ ] Process scheduling  
+- [ ] Concurrency primitives  
+- [ ] Fault handling and recovery  
+- [ ] Device drivers  
+- [ ] Hardware abstraction  
+- [ ] I/O buffering and caching  
+- [ ] File system abstraction  
+- [ ] Inter-process communication  
+- [ ] Resource tracking and cleanup  
+- [ ] Security and permissions  
+- [ ] User authentication support  
+- [ ] Networking stack  
+- [ ] Power management  
+- [ ] Module loading/unloading  
+- [ ] System resource accounting  
+- [ ] Timekeeping and clock management  
+- [ ] Debugging facilities  
+- [ ] Logging and tracing
+
 ## Contributing
 
 Contributions are welcome! Feel free to open issues or submit pull requests to improve the kernel.

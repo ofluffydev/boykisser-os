@@ -1,36 +1,126 @@
+#![feature(abi_x86_interrupt)]
 #![no_std]
 #![no_main]
 
-use core::{arch::asm, ptr};
+use core::{alloc::{GlobalAlloc, Layout}, arch::asm, cell::UnsafeCell, mem::MaybeUninit, ptr, sync::atomic::{AtomicUsize, Ordering}};
+use bk_interrupts::enable_apic;
 use framebuffer::FramebufferInfo;
 use gop_render::SimplifiedRenderer;
-use heapless::{String, Vec};
+use heapless::String;
 use spin::{Mutex, Once};
+use x86_64::instructions::interrupts::enable;
 
 mod font;
 mod framebuffer;
 mod gop_render;
 mod watermark;
+mod strings;
+mod bk_interrupts;
+
+const HEAP_SIZE: usize = 4096;
+
+struct GayAllocator {
+    heap: UnsafeCell<[MaybeUninit<u8>; HEAP_SIZE]>,
+    offset: AtomicUsize,
+}
+
+unsafe impl GlobalAlloc for GayAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        unsafe {
+            let size = layout.size();
+            let align = layout.align();
+
+            let heap_start = self.heap.get().cast::<u8>();
+            // spin loop to allocate
+            loop {
+                let orig_offset = self.offset.load(Ordering::Relaxed);
+                let ptr = heap_start.add(orig_offset);
+
+                let offset = ptr.align_offset(align);
+                if offset == usize::MAX {
+                    return core::ptr::null_mut();
+                }
+
+                let alloc = ptr.add(offset);
+                if alloc.offset_from(heap_start) as usize > HEAP_SIZE {
+                    return core::ptr::null_mut();
+                }
+
+                if self
+                    .offset
+                    .compare_exchange_weak(
+                        orig_offset,
+                        orig_offset + offset + size,
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    )
+                    .is_ok()
+                {
+                    // successfully wrote the new offset, the allocation succeeded
+                    return alloc;
+                } else {
+                    // something else modified the offset inbetween the start of the loop and here, just redo everything
+                    continue;
+                }
+            }
+        }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe {
+            let size = layout.size();
+            let heap_start = self.heap.get().cast::<u8>();
+            let start_of_alloc = ptr.offset_from(heap_start) as usize;
+            let end_of_alloc = ptr.add(size).offset_from(heap_start) as usize;
+
+            // this is just `if self.offset == end_of_alloc { self.offset = start_of_alloc; }` but done atomically
+            _ = self.offset.compare_exchange(
+                end_of_alloc,
+                start_of_alloc,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            );
+        }
+    }
+}
+
+unsafe impl Sync for GayAllocator {} // this is so it can be put in a `static` below
+
+#[global_allocator]
+static GLOBAL: GayAllocator = GayAllocator {
+    heap: UnsafeCell::new([const { MaybeUninit::uninit() }; HEAP_SIZE]),
+    offset: AtomicUsize::new(0),
+};
+
 
 // Global Once to hold the Mutex for the renderer
 pub static RENDERER: Once<Mutex<SimplifiedRenderer>> = Once::new();
 
-#[unsafe(no_mangle)] // THIS HAS TO BE &FrameBufferInfo or it WILL NOT WORK
+/// Helper function to get and lock the global renderer
+fn get_and_lock_renderer() -> spin::MutexGuard<'static, SimplifiedRenderer<'static>> {
+    RENDERER.get().expect("Renderer is not initialized").lock()
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn _start(fb: &'static FramebufferInfo) -> ! {
     let renderer = SimplifiedRenderer::new(fb);
     // Initialize the global renderer
     RENDERER.call_once(|| Mutex::new(renderer));
 
-    loop {
-        // Test the globabl one
-        RENDERER.get().unwrap().lock().clear_screen();
-        RENDERER.get().unwrap().lock().println("Meow");
+    enable(); // Enable interrupts
+    enable_apic(); // Enable the APIC
+    bk_interrupts::init_idt(); // Initialize the IDT
 
-        RENDERER.get().unwrap().lock().clear_screen();
-        RENDERER.get().unwrap().lock().show_alphabet();
-        RENDERER.get().unwrap().lock().render_content();
-        RENDERER.get().unwrap().lock().show_watermark();
-        RENDERER.get().unwrap().lock().println("meow");
+    loop {
+        // Test the global one
+        get_and_lock_renderer().clear_screen();
+        get_and_lock_renderer().print("Meow");
+
+        get_and_lock_renderer().clear_screen();
+        get_and_lock_renderer().show_alphabet();
+        get_and_lock_renderer().render_content();
+        get_and_lock_renderer().show_watermark();
+        get_and_lock_renderer().print("meow");
 
         let mut message: String<32> = String::new();
         let range = 0..=80;
@@ -39,15 +129,13 @@ pub extern "C" fn _start(fb: &'static FramebufferInfo) -> ! {
             message.push_str("Text :P ").unwrap();
             append_number_to_string(&mut message, i);
 
-            // Access the renderer through the global Mutex
-            if let Some(renderer) = RENDERER.get() {
-                renderer.lock().println(&message);
-            }
+            // Access the renderer through the helper function
+            get_and_lock_renderer().print(&message);
         }
 
         let words = "Hello, world! This is a test of the text rendering system. Let's see how it handles this long string of text.";
         for word in words.split_whitespace() {
-            RENDERER.get().unwrap().lock().println(word);
+            get_and_lock_renderer().print(word);
             sleep(100);
         }
     }
@@ -89,8 +177,8 @@ fn panic(panic: &core::panic::PanicInfo) -> ! {
         message.push_str(&line_str).unwrap();
     }
 
-    RENDERER.get().unwrap().lock().clear_screen();
-    RENDERER.get().unwrap().lock().println(&message);
+    get_and_lock_renderer().clear_screen();
+    get_and_lock_renderer().println(&message);
 
     loop {
         unsafe { core::arch::asm!("hlt") }
@@ -187,6 +275,6 @@ pub fn append_number_to_string<const N: usize>(s: &mut String<N>, num: usize) {
 
     // Append the digits in the correct order
     for j in (0..i).rev() {
-        s.push(buffer[j] as char);
+        let _ = s.push(buffer[j] as char);
     }
 }
