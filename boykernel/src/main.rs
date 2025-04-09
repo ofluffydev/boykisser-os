@@ -2,20 +2,33 @@
 #![no_std]
 #![no_main]
 
-use core::{alloc::{GlobalAlloc, Layout}, arch::asm, cell::UnsafeCell, mem::MaybeUninit, ptr, sync::atomic::{AtomicUsize, Ordering}};
+use alloc::string::ToString;
 use bk_interrupts::enable_apic;
+use core::{
+    alloc::{GlobalAlloc, Layout},
+    arch::asm,
+    cell::UnsafeCell,
+    mem::MaybeUninit,
+    panic::PanicInfo,
+    ptr,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 use framebuffer::FramebufferInfo;
 use gop_render::SimplifiedRenderer;
 use heapless::String;
+use serial::serial_write_str;
 use spin::{Mutex, Once};
 use x86_64::instructions::interrupts::enable;
 
+extern crate alloc;
+
+mod bk_interrupts;
 mod font;
 mod framebuffer;
 mod gop_render;
-mod watermark;
+mod serial;
 mod strings;
-mod bk_interrupts;
+mod watermark;
 
 const HEAP_SIZE: usize = 4096;
 
@@ -92,53 +105,49 @@ static GLOBAL: GayAllocator = GayAllocator {
     offset: AtomicUsize::new(0),
 };
 
-
 // Global Once to hold the Mutex for the renderer
 pub static RENDERER: Once<Mutex<SimplifiedRenderer>> = Once::new();
 
 /// Helper function to get and lock the global renderer
-fn get_and_lock_renderer() -> spin::MutexGuard<'static, SimplifiedRenderer<'static>> {
+pub fn get_and_lock_renderer() -> spin::MutexGuard<'static, SimplifiedRenderer<'static>> {
     RENDERER.get().expect("Renderer is not initialized").lock()
+}
+
+pub fn info(text: &str) {
+    serial_write_str("[INFO] ");
+    serial_write_str(text);
+    serial_write_str("\n");
+}
+
+pub fn error(text: &str) {
+    serial_write_str("[ERROR] ");
+    serial_write_str(text);
+    serial_write_str("\n");
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn _start(fb: &'static FramebufferInfo) -> ! {
+    info("Kernel successfully jumped to!");
+
     let renderer = SimplifiedRenderer::new(fb);
     // Initialize the global renderer
+    info("Initializing global renderer");
     RENDERER.call_once(|| Mutex::new(renderer));
 
+    info("Enabling interrupts");
     enable(); // Enable interrupts
     enable_apic(); // Enable the APIC
+    info("Initializing IDT");
     bk_interrupts::init_idt(); // Initialize the IDT
 
-    loop {
-        // Test the global one
-        get_and_lock_renderer().clear_screen();
-        get_and_lock_renderer().print("Meow");
+    // Test rendering
+    let renderer = get_and_lock_renderer();
+    renderer.clear_screen();
+    renderer.show_alphabet();
+    renderer.show_watermark();
 
-        get_and_lock_renderer().clear_screen();
-        get_and_lock_renderer().show_alphabet();
-        get_and_lock_renderer().render_content();
-        get_and_lock_renderer().show_watermark();
-        get_and_lock_renderer().print("meow");
-
-        let mut message: String<32> = String::new();
-        let range = 0..=80;
-        for i in range.into_iter() {
-            message.clear();
-            message.push_str("Text :P ").unwrap();
-            append_number_to_string(&mut message, i);
-
-            // Access the renderer through the helper function
-            get_and_lock_renderer().print(&message);
-        }
-
-        let words = "Hello, world! This is a test of the text rendering system. Let's see how it handles this long string of text.";
-        for word in words.split_whitespace() {
-            get_and_lock_renderer().print(word);
-            sleep(100);
-        }
-    }
+    info("Running interrupts test");
+    bk_interrupts::test_interrupts();
 
     loop {
         unsafe { asm!("hlt") }
@@ -148,6 +157,9 @@ pub extern "C" fn _start(fb: &'static FramebufferInfo) -> ! {
 #[cfg(not(test))]
 #[panic_handler]
 fn panic(panic: &core::panic::PanicInfo) -> ! {
+    serial::serial_write_str("Panic occurred: ");
+    print_panic_info_serial(&panic);
+
     use gop_render::CURSOR_STATE;
     unsafe {
         gop_render::CURSOR_STATE.force_unlock(); // rare case the item is locked
@@ -183,6 +195,33 @@ fn panic(panic: &core::panic::PanicInfo) -> ! {
     loop {
         unsafe { core::arch::asm!("hlt") }
     }
+}
+
+pub fn print_panic_info_serial(info: &PanicInfo) {
+    error("Panic occurred:");
+    serial_write_str("=== PANIC ===\n");
+
+    if let Some(location) = info.location() {
+        serial_write_str("Location: ");
+        serial_write_str(location.file());
+        serial_write_str(":");
+        serial_write_str(location.line().to_string().as_str());
+        serial_write_str(":");
+        serial_write_str(location.column().to_string().as_str());
+        serial_write_str("\n");
+    } else {
+        serial_write_str("Location: <unknown>\n");
+    }
+
+    if let Some(message) = info.message().as_str() {
+        serial_write_str("Message: ");
+        serial_write_str(message);
+        serial_write_str("\n");
+    } else {
+        serial_write_str("Message: <none>\n");
+    }
+
+    serial_write_str("=============\n");
 }
 
 #[unsafe(no_mangle)]
