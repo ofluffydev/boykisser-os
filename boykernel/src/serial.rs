@@ -17,3 +17,15 @@ pub fn serial_write_str(s: &str) {
         serial_write_byte(byte);
     }
 }
+
+pub fn info(text: &str) {
+    serial_write_str("[INFO] ");
+    serial_write_str(text);
+    serial_write_str("\n");
+}
+
+pub fn error(text: &str) {
+    serial_write_str("[ERROR] ");
+    serial_write_str(text);
+    serial_write_str("\n");
+}

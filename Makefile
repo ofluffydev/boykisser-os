@@ -49,7 +49,7 @@ qemu: iso
 		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
 		-drive format=raw,file=$(ISO_FILE) \
 		-smp 4 -m 6G -cpu max \
-		-device qemu-xhci -device usb-kbd --serial stdio -M q35 --no-reboot
+		-device qemu-xhci -device usb-kbd -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0 --serial stdio -M q35 --no-reboot
 
 rust-clean:
 	cd boykernel && cargo clean

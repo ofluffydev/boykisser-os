@@ -1,6 +1,12 @@
 # Boykisser OS
 
-Boykisser OS is a minimal operating system designed for educational purposes. It demonstrates the basics of kernel and bootloader development using Rust and UEFI.
+Boykisser OS is built to be a decent, daily-drivable, and safe operating system. It demonstrates the basics of kernel and bootloader development using Rust and UEFI.
+
+As said above, the current goals are for the OS to be:
+
+- Decent: Does not create an environmnet so complicated that the user most relearn how to use their computer.
+- Daily-drivable: Expected and reproducable behavior for features you'd expect to need on a day-to-day basis.
+- Safe operating system: Follows the purity and safety of Rust, creating a stable, memory-safe, and thread-safe kernel and OS.
 
 ## Features
 - Custom kernel written in Rust.

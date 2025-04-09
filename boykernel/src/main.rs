@@ -2,32 +2,38 @@
 #![no_std]
 #![no_main]
 
-use alloc::string::ToString;
-use bk_interrupts::enable_apic;
 use core::{
     alloc::{GlobalAlloc, Layout},
     arch::asm,
     cell::UnsafeCell,
     mem::MaybeUninit,
-    panic::PanicInfo,
-    ptr,
     sync::atomic::{AtomicUsize, Ordering},
 };
-use framebuffer::FramebufferInfo;
-use gop_render::SimplifiedRenderer;
-use heapless::String;
-use serial::serial_write_str;
 use spin::{Mutex, Once};
 use x86_64::instructions::interrupts::enable;
 
+#[allow(unused_imports)] // Falsely reports as unused for some reason
+use alloc::string::ToString;
+
 extern crate alloc;
 
+use crate::{
+    beep::beep,
+    bk_interrupts::{enable_apic, init_idt, test_interrupts},
+    framebuffer::FramebufferInfo,
+    gop_render::SimplifiedRenderer,
+    serial::info,
+};
+
+mod beep;
 mod bk_interrupts;
 mod font;
 mod framebuffer;
 mod gop_render;
+pub mod memory;
 mod serial;
 mod strings;
+mod utils;
 mod watermark;
 
 const HEAP_SIZE: usize = 4096;
@@ -44,7 +50,6 @@ unsafe impl GlobalAlloc for GayAllocator {
             let align = layout.align();
 
             let heap_start = self.heap.get().cast::<u8>();
-            // spin loop to allocate
             loop {
                 let orig_offset = self.offset.load(Ordering::Relaxed);
                 let ptr = heap_start.add(orig_offset);
@@ -69,10 +74,8 @@ unsafe impl GlobalAlloc for GayAllocator {
                     )
                     .is_ok()
                 {
-                    // successfully wrote the new offset, the allocation succeeded
                     return alloc;
                 } else {
-                    // something else modified the offset inbetween the start of the loop and here, just redo everything
                     continue;
                 }
             }
@@ -86,7 +89,6 @@ unsafe impl GlobalAlloc for GayAllocator {
             let start_of_alloc = ptr.offset_from(heap_start) as usize;
             let end_of_alloc = ptr.add(size).offset_from(heap_start) as usize;
 
-            // this is just `if self.offset == end_of_alloc { self.offset = start_of_alloc; }` but done atomically
             _ = self.offset.compare_exchange(
                 end_of_alloc,
                 start_of_alloc,
@@ -97,7 +99,7 @@ unsafe impl GlobalAlloc for GayAllocator {
     }
 }
 
-unsafe impl Sync for GayAllocator {} // this is so it can be put in a `static` below
+unsafe impl Sync for GayAllocator {}
 
 #[global_allocator]
 static GLOBAL: GayAllocator = GayAllocator {
@@ -113,41 +115,29 @@ pub fn get_and_lock_renderer() -> spin::MutexGuard<'static, SimplifiedRenderer<'
     RENDERER.get().expect("Renderer is not initialized").lock()
 }
 
-pub fn info(text: &str) {
-    serial_write_str("[INFO] ");
-    serial_write_str(text);
-    serial_write_str("\n");
-}
-
-pub fn error(text: &str) {
-    serial_write_str("[ERROR] ");
-    serial_write_str(text);
-    serial_write_str("\n");
-}
-
 #[unsafe(no_mangle)]
 pub extern "C" fn _start(fb: &'static FramebufferInfo) -> ! {
     info("Kernel successfully jumped to!");
 
     let renderer = SimplifiedRenderer::new(fb);
-    // Initialize the global renderer
     info("Initializing global renderer");
     RENDERER.call_once(|| Mutex::new(renderer));
 
     info("Enabling interrupts");
-    enable(); // Enable interrupts
-    enable_apic(); // Enable the APIC
+    enable();
+    enable_apic();
     info("Initializing IDT");
-    bk_interrupts::init_idt(); // Initialize the IDT
+    init_idt();
 
-    // Test rendering
     let renderer = get_and_lock_renderer();
     renderer.clear_screen();
     renderer.show_alphabet();
     renderer.show_watermark();
 
     info("Running interrupts test");
-    bk_interrupts::test_interrupts();
+    test_interrupts();
+
+    beep(440, 1000);
 
     loop {
         unsafe { asm!("hlt") }
@@ -157,51 +147,15 @@ pub extern "C" fn _start(fb: &'static FramebufferInfo) -> ! {
 #[cfg(not(test))]
 #[panic_handler]
 fn panic(panic: &core::panic::PanicInfo) -> ! {
-    serial::serial_write_str("Panic occurred: ");
-    print_panic_info_serial(&panic);
+    use serial::serial_write_str;
 
-    use gop_render::CURSOR_STATE;
-    unsafe {
-        gop_render::CURSOR_STATE.force_unlock(); // rare case the item is locked
-    }
-    CURSOR_STATE.lock().x = 40;
-    CURSOR_STATE.lock().y = 40;
-
-    let mut message: String<128> = String::new();
-    message
-        .push_str(panic.message().as_str().unwrap_or("unknown error"))
-        .unwrap();
-
-    if let Some(location) = panic.location() {
-        message.push_str(" at ").unwrap();
-
-        // Ensure the file name is valid UTF-8
-        if let Ok(file_name) = core::str::from_utf8(location.file().as_bytes()) {
-            message.push_str(file_name).unwrap();
-        } else {
-            message.push_str("<invalid file>").unwrap();
-        }
-
-        message.push_str(": Line ").unwrap(); // Add "Line" label
-
-        let mut line_str: String<16> = String::new();
-        append_number_to_string(&mut line_str, location.line() as usize);
-        message.push_str(&line_str).unwrap();
-    }
-
-    get_and_lock_renderer().clear_screen();
-    get_and_lock_renderer().println(&message);
-
-    loop {
-        unsafe { core::arch::asm!("hlt") }
-    }
-}
-
-pub fn print_panic_info_serial(info: &PanicInfo) {
-    error("Panic occurred:");
+    serial_write_str("Panic occurred: ");
     serial_write_str("=== PANIC ===\n");
 
-    if let Some(location) = info.location() {
+    #[cfg(not(debug_assertions))]
+    serial_write_str("[WARNING] This is a release build, panic information may be limited.\n");
+
+    if let Some(location) = panic.location() {
         serial_write_str("Location: ");
         serial_write_str(location.file());
         serial_write_str(":");
@@ -213,7 +167,7 @@ pub fn print_panic_info_serial(info: &PanicInfo) {
         serial_write_str("Location: <unknown>\n");
     }
 
-    if let Some(message) = info.message().as_str() {
+    if let Some(message) = panic.message().as_str() {
         serial_write_str("Message: ");
         serial_write_str(message);
         serial_write_str("\n");
@@ -222,98 +176,9 @@ pub fn print_panic_info_serial(info: &PanicInfo) {
     }
 
     serial_write_str("=============\n");
-}
+    serial_write_str("\n\n");
 
-#[unsafe(no_mangle)]
-pub unsafe fn memset(dest: *mut u8, value: u8, count: usize) {
-    let mut ptr = dest;
-    unsafe {
-        for _ in 0..count {
-            ptr::write(ptr, value);
-            ptr = ptr.add(1);
-        }
-    }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe fn memcmp(s1: *const u8, s2: *const u8, n: usize) -> i32 {
-    for i in 0..n {
-        let a = unsafe { ptr::read(s1.add(i)) };
-        let b = unsafe { ptr::read(s2.add(i)) };
-        if a != b {
-            return a as i32 - b as i32;
-        }
-    }
-    0
-}
-
-#[unsafe(no_mangle)]
-pub unsafe fn memcpy(dest: *mut u8, src: *const u8, count: usize) {
-    for i in 0..count {
-        unsafe { ptr::write(dest.add(i), ptr::read(src.add(i))) };
-    }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe fn memmove(dest: *mut u8, src: *const u8, count: usize) {
-    if dest as usize <= src as usize || dest as usize >= src as usize + count {
-        // Non-overlapping regions, can copy forward
-        for i in 0..count {
-            unsafe { ptr::write(dest.add(i), ptr::read(src.add(i))) };
-        }
-    } else {
-        // Overlapping regions, copy backward
-        for i in (0..count).rev() {
-            unsafe { ptr::write(dest.add(i), ptr::read(src.add(i))) };
-        }
-    }
-}
-
-/// Reads the CPU's timestamp counter
-fn read_timestamp_counter() -> u64 {
-    let mut low: u32;
-    let mut high: u32;
-    unsafe {
-        asm!(
-            "rdtsc",
-            out("eax") low,
-            out("edx") high
-        );
-    }
-    ((high as u64) << 32) | (low as u64)
-}
-
-/// Busy-wait loop to sleep for the specified number of milliseconds
-pub fn sleep(milliseconds: u64) {
-    // Assuming a CPU frequency of 3 GHz (adjust as needed for your system)
-    const CPU_FREQUENCY_HZ: u64 = 2_200_000_000;
-    let cycles_per_ms = CPU_FREQUENCY_HZ / 1_000;
-
-    let start = read_timestamp_counter();
-    let target = start + (milliseconds * cycles_per_ms);
-
-    while read_timestamp_counter() < target {
-        // Busy-wait
-    }
-}
-
-pub fn append_number_to_string<const N: usize>(s: &mut String<N>, num: usize) {
-    let mut buffer = [0u8; 20]; // Enough to hold any usize
-    let mut i = 0;
-    let mut n = num;
-
-    // Convert the number to a string in reverse order
     loop {
-        buffer[i] = b'0' + (n % 10) as u8;
-        n /= 10;
-        i += 1;
-        if n == 0 {
-            break;
-        }
-    }
-
-    // Append the digits in the correct order
-    for j in (0..i).rev() {
-        let _ = s.push(buffer[j] as char);
+        unsafe { core::arch::asm!("hlt") }
     }
 }
