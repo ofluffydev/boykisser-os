@@ -13,8 +13,8 @@ pub fn beep(freq: u32, duration_ms: u64) {
     unsafe {
         // Set PIT to mode 3 (square wave) on channel 2
         outb(PIT_COMMAND, 0xB6);
-        outb(PIT_CHANNEL2, (divisor & 0xFF) as u8);          // Low byte
-        outb(PIT_CHANNEL2, ((divisor >> 8) & 0xFF) as u8);   // High byte
+        outb(PIT_CHANNEL2, (divisor & 0xFF) as u8); // Low byte
+        outb(PIT_CHANNEL2, ((divisor >> 8) & 0xFF) as u8); // High byte
 
         // Enable speaker
         let tmp = inb(SPEAKER_PORT);

@@ -123,11 +123,9 @@ pub extern "C" fn _start(fb: &'static FramebufferInfo) -> ! {
     info("Initializing global renderer");
     RENDERER.call_once(|| Mutex::new(renderer));
 
-    info("Enabling interrupts");
-    enable();
-    enable_apic();
-    info("Initializing IDT");
-    init_idt();
+    info("Initializing interrupts");
+    let madt = get_madt_table();
+    bk_interrupts::init_interrupts(&madt); // Pass the MADT table here
 
     let renderer = get_and_lock_renderer();
     renderer.clear_screen();
@@ -137,8 +135,6 @@ pub extern "C" fn _start(fb: &'static FramebufferInfo) -> ! {
     info("Running interrupts test");
     test_interrupts();
 
-    beep(440, 1000);
-
     loop {
         unsafe { asm!("hlt") }
     }
@@ -147,9 +143,9 @@ pub extern "C" fn _start(fb: &'static FramebufferInfo) -> ! {
 #[cfg(not(test))]
 #[panic_handler]
 fn panic(panic: &core::panic::PanicInfo) -> ! {
-    use serial::serial_write_str;
+    use serial::{error, serial_write_str};
 
-    serial_write_str("Panic occurred: ");
+    error("Panic occurred: ");
     serial_write_str("=== PANIC ===\n");
 
     #[cfg(not(debug_assertions))]

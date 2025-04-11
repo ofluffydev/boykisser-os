@@ -24,6 +24,7 @@ pub fn info(text: &str) {
     serial_write_str("\n");
 }
 
+#[allow(dead_code)]
 pub fn error(text: &str) {
     serial_write_str("[ERROR] ");
     serial_write_str(text);

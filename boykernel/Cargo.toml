@@ -10,6 +10,7 @@ panic = "abort"
 panic = "abort"
 
 [dependencies]
+acpi = "5.2.0"
 arrayvec = { version = "0.7.6", default-features = false }
 goblin = { version = "0.9.3", default-features = false, features = ["elf64"] }
 heapless = { version = "0.8.0", default-features = false }
